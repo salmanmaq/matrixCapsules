@@ -22,8 +22,9 @@ import torchvision.transforms as transforms
 import torchvision.utils as vutils
 from torch.autograd import Variable
 import torch.nn.functional as F
+from torch.optim import lr_scheduler
 
-import models.capsNet as capsNet
+import models.matrixCapsules as capsNet
 from dataset.cityscapesDataLoader import cityscapesDataset
 import utils
 
@@ -98,18 +99,23 @@ def main():
                   for x in ['train', 'val', 'test']}
     dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val', 'test']}
 
-    # Initialize the Network
-    model = capsNet.CapsNet(args.routing_iterations)
+    steps = len(dataloaders['train'])//args.batchSize
+    lambda_ = 1e-3
+    m = 0.2
+    A,B,C,D,E,r = 32,32,32,32,10,args.routing_iterations
 
-    if args.with_reconstruction:
-        reconstruction_model = capsNet.ReconstructionNet(20, 20)
-        reconstruction_alpha = 0.0005
-        model = capsNet.CapsNetWithReconstruction(model, reconstruction_model)
+    # Initialize the Network
+    model = capsNet.CapsNet(A,B,C,D,E,r)
 
     if use_gpu:
         model.cuda()
 
     print(model)
+
+    if args.net:
+        model.load_state_dict(torch.load(args.net))
+        m = 0.8
+        lambda_ = 0.9
     # Define the optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
