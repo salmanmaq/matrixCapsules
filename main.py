@@ -41,17 +41,19 @@ parser.add_argument('--imageSize', default=128, type=int,
             help='height/width of the input image to the network')
 parser.add_argument('--lr', default=0.001, type=float,
             help='learning rate (default: 0.0005)')
+parser.add_argument('--routing_iterations', type=int, default=3,
+            help='Number of Routing Iterations')
+parser.add_argument('--clip', default=5, type=int,
+            help="Gradient Clipping")
 parser.add_argument('--net', default='',
             help="path to net (to continue training)")
 parser.add_argument('--print-freq', '-p', default=1, type=int, metavar='N',
             help='print frequency (default:1)')
 parser.add_argument('--save-dir', dest='save_dir',
-            help='The directory used to save the trained models',
-            default='save_temp', type=str)
+            default='save_temp', type=str,
+            help='The directory used to save the trained models')
 parser.add_argument('--verbose', default = False, type=bool,
             help='Prints certain messages which user can specify if true')
-parser.add_argument('--routing_iterations', type=int, default=3,
-            help='Number of Routing Iterations')
 parser.add_argument('--with_reconstruction', action='store_true', default=True,
             help='Net with reconstruction or not')
 
@@ -71,15 +73,15 @@ def main():
     # Initialize the data transforms
     data_transforms = {
         'train': transforms.Compose([
-            transforms.Scale((args.imageSize, args.imageSize)),
+            transforms.Resize((args.imageSize, args.imageSize), interpolation=Image.NEAREST),
             transforms.ToTensor(),
         ]),
         'val': transforms.Compose([
-            transforms.Scale((args.imageSize, args.imageSize)),
+            transforms.Resize((args.imageSize, args.imageSize), interpolation=Image.NEAREST),
             transforms.ToTensor(),
         ]),
         'test': transforms.Compose([
-            transforms.Scale((args.imageSize, args.imageSize)),
+            transforms.Resize((args.imageSize, args.imageSize), interpolation=Image.NEAREST),
             transforms.ToTensor(),
         ]),
     }
@@ -99,10 +101,14 @@ def main():
                   for x in ['train', 'val', 'test']}
     dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val', 'test']}
 
-    steps = len(dataloaders['train'])//args.batchSize
+    # Get the dictionary for the id and RGB value pairs for the dataset
+    classes = image_datasets['train'].classes
+    key = utils.disentangleKey(classes)
+    num_classes = len(key) + 1 # +1 for the background class
+
     lambda_ = 1e-3
     m = 0.2
-    A,B,C,D,E,r = 32,32,32,32,10,args.routing_iterations
+    A,B,C,D,E,r = 32,32,32,32,num_classes,args.routing_iterations
 
     # Initialize the Network
     model = capsNet.CapsNet(A,B,C,D,E,r)
@@ -116,8 +122,10 @@ def main():
         model.load_state_dict(torch.load(args.net))
         m = 0.8
         lambda_ = 0.9
+
     # Define the optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, 'max',patience = 1)
 
     # Get the dictionary for the id and RGB value pairs for the dataset
     classes = image_datasets['train'].classes
@@ -129,57 +137,78 @@ def main():
     for epoch in range(args.start_epoch, args.epochs):
 
         # Train for one epoch
-        train(dataloaders['train'], model, optimizer, epoch, key)
+        train(dataloaders['train'], model, optimizer, epoch, key, lambda_, m)
 
         # Save checkpoints
         #torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (args.save_dir, epoch))
 
-def train(train_loader, model, optimizer, epoch, key):
+def train(train_loader, model, optimizer, epoch, key, lambda_, m):
     '''
         Run one training epoch
     '''
     model.train()
-    for i, (data, target) in enumerate(train_loader):
+    b = 0
+    steps = len(train_loader)//args.batchSize
+    for i, (img, gt) in enumerate(train_loader):
 
-        # Generate the target vector from the groundtruth image
-        # Multiplication by 255 to convert from float to unit8
-        target_temp = target * 255
-        label = utils.generateGTmask(target_temp, key)
-        print(torch.max(label))
-
-        if use_gpu:
-            data = data.cuda()
-            label = label.cuda()
-
-        #gt.view(-1)
-        #print(target)
-        data, label = Variable(data), Variable(label, requires_grad=False)
-        label = label.float()
+        b += 1
+        if lambda_ < 1:
+            lambda_ += 2e-1/steps
+        if m < 0.9:
+            m += 2e-1/steps
         optimizer.zero_grad()
-        if args.with_reconstruction:
-            output, probs = model(data, label)
-            loss = F.mse_loss(output, label)
-            # margin_loss = loss_fn(probs, target)
-            # loss = reconstruction_alpha * reconstruction_loss + margin_loss
+        img, gt = Variable(img), Variable(gt)
+        if use_gpu:
+            img = img.cuda()
+            gt = gt.cuda()
 
-        # if args.verbose:
-        print(output[0,3000:3020])
-        print(label[0,3000:3020])
+        out = model(img, lambda_)
+        out_poses, out_labels = out[:,:-10],out[:,-10:]
+        loss = model.loss(out_labels, labels, m)
 
+        torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
         loss.backward()
         optimizer.step()
 
-        print('[%d/%d][%d/%d] Loss: %.4f'
-              % (epoch, args.epochs, i, len(train_loader), loss.mean().data[0]))
-        if i % args.print_freq == 0:
-        #    vutils.save_image(real_cpu,
-        #            '%s/real_samples.png' % args.save_dir,
-        #            normalize=True)
-        #    #fake = netG(fixed_noise)
-        #    vutils.save_image(fake.data,
-        #            '%s/fake_samples_epoch_%03d.png' % (args.save_dir, epoch),
-        #            normalize=True)
-            utils.displaySamples(data, output, target, use_gpu, key)
+        # # Generate the target vector from the groundtruth image
+        # # Multiplication by 255 to convert from float to unit8
+        # target_temp = target * 255
+        # label = utils.generateGTmask(target_temp, key)
+        # print(torch.max(label))
+        #
+        # if use_gpu:
+        #     data = data.cuda()
+        #     label = label.cuda()
+        #
+        # #gt.view(-1)
+        # #print(target)
+        # data, label = Variable(data), Variable(label, requires_grad=False)
+        # label = label.float()
+        # optimizer.zero_grad()
+        # if args.with_reconstruction:
+        #     output, probs = model(data, label)
+        #     loss = F.mse_loss(output, label)
+        #     # margin_loss = loss_fn(probs, target)
+        #     # loss = reconstruction_alpha * reconstruction_loss + margin_loss
+        #
+        # # if args.verbose:
+        # print(output[0,3000:3020])
+        # print(label[0,3000:3020])
+        #
+        # loss.backward()
+        # optimizer.step()
+        #
+        # print('[%d/%d][%d/%d] Loss: %.4f'
+        #       % (epoch, args.epochs, i, len(train_loader), loss.mean().data[0]))
+        # if i % args.print_freq == 0:
+        # #    vutils.save_image(real_cpu,
+        # #            '%s/real_samples.png' % args.save_dir,
+        # #            normalize=True)
+        # #    #fake = netG(fixed_noise)
+        # #    vutils.save_image(fake.data,
+        # #            '%s/fake_samples_epoch_%03d.png' % (args.save_dir, epoch),
+        # #            normalize=True)
+        #     utils.displaySamples(data, output, target, use_gpu, key)
 
 if __name__ == '__main__':
     main()

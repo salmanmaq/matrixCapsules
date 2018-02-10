@@ -12,7 +12,7 @@ import numpy as np
 import math
 from torch.autograd import Variable
 
-verbose = False
+verbose = True
 
 class PrimaryCaps(nn.Module):
     """
@@ -205,7 +205,8 @@ class ConvCaps(nn.Module):
 class CapsNet(nn.Module):
     def __init__(self,A=32,B=32,C=32,D=32, E=10,r = 3):
         super(CapsNet, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=A,
+        self.num_classes = E
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=A,
                                kernel_size=5, stride=2)
         self.primary_caps = PrimaryCaps(A,B)
         self.convcaps1 = ConvCaps(B, C, kernel = 3, stride=2,iteration=r,
@@ -217,11 +218,33 @@ class CapsNet(nn.Module):
 
 
     def forward(self,x,lambda_): #b,1,28,28
+        if verbose:
+            print('Image Input')
+            print(x.data.shape)
         x = F.relu(self.conv1(x)) #b,32,12,12
+        if verbose:
+            print('After conv1')
+            print(x.data.shape)
         x = self.primary_caps(x) #b,32*(4*4+1),12,12
+        if verbose:
+            print('After Primary Caps')
+            print(x.data.shape)
         x = self.convcaps1(x,lambda_) #b,32*(4*4+1),5,5
+        if verbose:
+            print('After ConvCaps1')
+            print(x.data.shape)
         x = self.convcaps2(x,lambda_) #b,32*(4*4+1),3,3
-        x = self.classcaps(x,lambda_).view(-1,10*16+10) #b,10*16+10
+        if verbose:
+            print('After ConvCaps2')
+            print(x.data.shape)
+        x = self.classcaps(x,lambda_)
+        if verbose:
+            print('After ClassCaps')
+            print(x.data.shape)
+        x = x.view(-1,self.num_classes*16+self.num_classes) #b,10*16+10
+        if verbose:
+            print('After ClassCaps Reshape')
+            print(x.data.shape)
         return x
 
     def loss(self, x, target, m): #x:b,10 target:b
