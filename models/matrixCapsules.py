@@ -241,10 +241,10 @@ class CapsNet(nn.Module):
         if verbose:
             print('After ClassCaps')
             print(x.data.shape)
-        x = x.view(-1,self.num_classes*16+self.num_classes) #b,10*16+10
-        if verbose:
-            print('After ClassCaps Reshape')
-            print(x.data.shape)
+        #x = x.view(-1,self.num_classes*16+self.num_classes) #b,10*16+10
+        #if verbose:
+        #    print('After ClassCaps Reshape')
+        #    print(x.data.shape)
         return x
 
     def loss(self, x, target, m): #x:b,10 target:b
@@ -259,3 +259,35 @@ class CapsNet(nn.Module):
     def loss2(self,x ,target):
         loss = F.cross_entropy(x,target)
         return loss
+
+class segmentationNet(nn.Module):
+    '''The Segmentation Network'''
+
+    def __init__(self, nc):
+        super(segmentationNet, self).__init__()
+        self.main = nn.Sequential(
+            # input is Z, going into a convolution
+            nn.ConvTranspose2d(nc*16+nc, 512, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(512),
+            nn.ReLU(True),
+            # state size. (ngf*8) x 4 x 4
+            nn.ConvTranspose2d(512, 256, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(True),
+            # state size. (ngf*4) x 8 x 8
+            nn.ConvTranspose2d(256, 128, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+            # state size. (ngf*2) x 16 x 16
+            nn.ConvTranspose2d(128, 64, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+            # state size. (ngf) x 32 x 32
+            nn.ConvTranspose2d(64, nc, 4, 2, 1, bias=False),
+            nn.Tanh()
+            # state size. (nc) x 64 x 64
+        )
+
+    def forward(self, input):
+        output = self.main(input)
+        return output

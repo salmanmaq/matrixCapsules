@@ -83,6 +83,41 @@ def disentangleKey(key):
 
     return dKey
 
+def generatePresenceVector(batch, key):
+    '''
+        Generate a vector with dimensions of classes equal to the number of
+        classes. Each elements corresponds to the presence of a particular
+        class in the image: It is 1 if a certain class is present, or 0 if it
+        is absent.
+    '''
+    batch = batch.numpy()
+    # Iterate over all images in a batch
+    for i in range(len(batch)):
+        img = batch[i,:,:,:]
+        imgSize = img.shape[1] * img.shape[2]
+        img = np.transpose(img, (1,2,0))
+        presence = np.zeros(len(key) + 1) # +1 for the background class
+
+        # Iterate over all the key-value pairs in the class Key dict
+        for k in range(len(key)):
+            rgb = key[k]
+            mask = np.where(np.all(img == rgb, axis = -1))
+            presence[k] = len(mask[0])/imgSize
+
+        # Check for background pixels [0,0,0]
+        rgb = np.array([0,0,0])
+        mask = np.where(np.all(img == rgb, axis = -1))
+        presence[19] = len(mask[0])/imgSize
+
+        presence = torch.from_numpy(presence).unsqueeze(0)
+
+        if 'label' in locals():
+            label = torch.cat((label, presence), 0)
+        else:
+            label = presence
+
+    return label
+
 def generateGTmask(batch, key):
     '''
         Generates the category-wise encoded vector for the segmentation classes

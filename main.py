@@ -104,7 +104,9 @@ def main():
     # Get the dictionary for the id and RGB value pairs for the dataset
     classes = image_datasets['train'].classes
     key = utils.disentangleKey(classes)
-    num_classes = len(key) + 1 # +1 for the background class
+    num_classes = len(key) + 1
+    # +1 for the background class. The +1 is dataset dependant, since some
+    # datasets have an intrinsic background class
 
     lambda_ = 1e-3
     m = 0.2
@@ -112,11 +114,16 @@ def main():
 
     # Initialize the Network
     model = capsNet.CapsNet(A,B,C,D,E,r)
+    segNet = capsNet.segmentationNet(num_classes)
 
     if use_gpu:
         model.cuda()
+        segNet.cuda()
 
+    print('The Matrix Capsules Network')
     print(model)
+    print('The Segmentation Network')
+    print(segNet)
 
     if args.net:
         model.load_state_dict(torch.load(args.net))
@@ -127,22 +134,19 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, 'max',patience = 1)
 
-    # Get the dictionary for the id and RGB value pairs for the dataset
-    classes = image_datasets['train'].classes
-    key = utils.disentangleKey(classes)
-
     # Initialize the loss function
     # loss_fn = capsNet.MarginLoss(0.9, 0.1, 0.5)
 
     for epoch in range(args.start_epoch, args.epochs):
 
         # Train for one epoch
-        train(dataloaders['train'], model, optimizer, epoch, key, lambda_, m)
+        train(dataloaders['train'], model, optimizer, epoch, key, lambda_, m,
+              num_classes)
 
         # Save checkpoints
         #torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (args.save_dir, epoch))
 
-def train(train_loader, model, optimizer, epoch, key, lambda_, m):
+def train(train_loader, model, optimizer, epoch, key, lambda_, m, nc):
     '''
         Run one training epoch
     '''
@@ -151,19 +155,24 @@ def train(train_loader, model, optimizer, epoch, key, lambda_, m):
     steps = len(train_loader)//args.batchSize
     for i, (img, gt) in enumerate(train_loader):
 
+        # Generate the class-wise probability vector
+        gt_temp = gt * 255
+        labels = utils.generatePresenceVector(gt_temp, key).float()
+
         b += 1
         if lambda_ < 1:
             lambda_ += 2e-1/steps
         if m < 0.9:
             m += 2e-1/steps
         optimizer.zero_grad()
-        img, gt = Variable(img), Variable(gt)
+        img, labels = Variable(img), Variable(labels)
         if use_gpu:
             img = img.cuda()
-            gt = gt.cuda()
+            label = labels.cuda()
 
         out = model(img, lambda_)
-        out_poses, out_labels = out[:,:-10],out[:,-10:]
+        out_poses, out_labels = out[:,:-nc],out[:,-nc:]
+
         loss = model.loss(out_labels, labels, m)
 
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
