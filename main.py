@@ -113,7 +113,7 @@ def main():
     A,B,C,D,E,r = 32,32,32,32,num_classes,args.routing_iterations
 
     # Initialize the Network
-    model = capsNet.CapsNet(A,B,C,D,E,r)
+    model = capsNet.CapsNet(A,B,C,D,E,r,use_gpu)
     segNet = capsNet.segmentationNet(num_classes)
 
     if use_gpu:
@@ -140,13 +140,13 @@ def main():
     for epoch in range(args.start_epoch, args.epochs):
 
         # Train for one epoch
-        train(dataloaders['train'], model, optimizer, epoch, key, lambda_, m,
+        train(dataloaders['train'], model, segNet, optimizer, epoch, key, lambda_, m,
               num_classes)
 
         # Save checkpoints
         #torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (args.save_dir, epoch))
 
-def train(train_loader, model, optimizer, epoch, key, lambda_, m, nc):
+def train(train_loader, model, segNet, optimizer, epoch, key, lambda_, m, nc):
     '''
         Run one training epoch
     '''
@@ -165,19 +165,35 @@ def train(train_loader, model, optimizer, epoch, key, lambda_, m, nc):
         if m < 0.9:
             m += 2e-1/steps
         optimizer.zero_grad()
-        img, labels = Variable(img), Variable(labels)
+        img, labels= Variable(img), Variable(labels),
+        gt = Variable(gt, requires_grad=False)
         if use_gpu:
             img = img.cuda()
-            label = labels.cuda()
+            labels = labels.cuda()
+            gt = gt.cuda()
 
         out = model(img, lambda_)
-        out_poses, out_labels = out[:,:-nc],out[:,-nc:]
+        outForLoss = out.view(-1, nc*16 + nc) #b,10*16+10
+        out_poses, out_labels = outForLoss[:,:-nc],outForLoss[:,-nc:]
 
-        loss = model.loss(out_labels, labels, m)
+        #loss = model.loss(out_labels, labels, m, nc)
+        classLoss = model.loss3(out_labels, labels)
 
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+
+        # Pass the output of Matrix Capsule Network to the Segmentation Network
+        seg = segNet(out)
+
+        segLoss = segNet.loss(seg, gt)
+
+        loss = classLoss + segLoss
+
         loss.backward()
         optimizer.step()
+
+        print('[%d/%d][%d/%d] Loss: %.4f'
+              % (epoch, args.epochs, i, len(train_loader), loss.mean().data[0]))
+        utils.displaySamples(img, seg, gt, use_gpu, key)
 
         # # Generate the target vector from the groundtruth image
         # # Multiplication by 255 to convert from float to unit8

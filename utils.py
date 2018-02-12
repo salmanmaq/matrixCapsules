@@ -19,6 +19,7 @@ def displaySamples(data, generated, gt, use_gpu, key):
     if use_gpu:
         data = data.cpu()
         generated = generated.cpu()
+        gt = gt.cpu()
 
     #unNorm = UnNormalize(mean=[0.485,0.456,0.406],std=[0.229,0.224,0.225])
 
@@ -32,13 +33,17 @@ def displaySamples(data, generated, gt, use_gpu, key):
     # seg_mask = np.transpose(seg_mask, (1,2,0))
     # seg_mask = cv2.cvtColor(seg_mask, cv2.COLOR_BGR2RGB)
 
-    gt = gt.numpy()
+    gt = gt.data.numpy()
     gt = np.transpose(np.squeeze(gt[0,:,:,:]), (1,2,0))
     gt = cv2.cvtColor(gt, cv2.COLOR_BGR2RGB)
 
-    generated = generated.data.numpy()
-    generated = labelToImage(generated, key)
+    #generated = generated.data.numpy()
+    #generated = labelToImage(generated, key)
     #generated = generated * 255
+
+    generated = generated.data.numpy()
+    generated = np.transpose(np.squeeze(generated[0,:,:,:]), (1,2,0))
+    generated = cv2.cvtColor(generated, cv2.COLOR_BGR2RGB)
 
     data = data.data.numpy()
     data = np.transpose(np.squeeze(data[0,:,:,:]), (1,2,0))

@@ -12,7 +12,7 @@ import numpy as np
 import math
 from torch.autograd import Variable
 
-verbose = True
+verbose = False
 
 class PrimaryCaps(nn.Module):
     """
@@ -56,7 +56,7 @@ class ConvCaps(nn.Module):
         transform_share: whether to share transformation matrix.
 
     """
-    def __init__(self, B=32, C=32, kernel = 3, stride=2,iteration=3,
+    def __init__(self, B=32, C=32, kernel = 3, stride=2,iteration=3, use_gpu=True,
                  coordinate_add=False, transform_share = False):
         super(ConvCaps, self).__init__()
         self.B =B
@@ -73,12 +73,12 @@ class ConvCaps(nn.Module):
         else:
             self.W = nn.Parameter(torch.randn(self.B, self.C, 4, 4)) #B,C,4,4
         self.iteration=iteration
+        self.use_gpu = use_gpu
 
-    def forward(self, x, lambda_,):
+    def forward(self, x, lambda_):
 #        t = time()
         b = x.size(0) #batchsize
         width_in = x.size(2)  #12
-        use_cuda = next(self.parameters()).is_cuda
         pose = x[:,:-self.B,:,:].contiguous() #b,16*32,12,12
         pose = pose.view(b,16,self.B,width_in,width_in).permute(0,2,3,4,1).contiguous() #b,B,12,12,16
         activation = x[:,-self.B:,:,:] #b,B,12,12
@@ -110,7 +110,7 @@ class ConvCaps(nn.Module):
                             add.append([pos_x/width_in, pos_y/width_in])
             add = Variable(torch.Tensor(add)).view(1,1,self.K,self.K,1,w,w,2)
             add = add.expand(b,self.B,self.K,self.K,self.C,w,w,2).contiguous()
-            if use_cuda:
+            if self.use_gpu:
                 add = add.cuda()
             votes[:,:,:,:,:,:,:,0,:2] = votes[:,:,:,:,:,:,:,0,:2] + add
 
@@ -130,7 +130,7 @@ class ConvCaps(nn.Module):
                         r = R[:,:,self.stride*i:self.stride*i+self.K,  #b,B,K,K
                                 self.stride*j:self.stride*j+self.K,typ,i,j]
                         r = Variable(torch.from_numpy(r).float())
-                        if use_cuda:
+                        if self.use_gpu:
                             r = r.cuda()
                         r_s.append(r)
                         a = activation[:,:,self.stride*i:self.stride*i+self.K,
@@ -192,7 +192,7 @@ class ConvCaps(nn.Module):
                     sum_p_hat = sum_p_hat.view(b,self.B,1,1,1).expand(b,self.B,self.C,u,v)
                     r = (p_hat/sum_p_hat) #b,B,C,u,v --> R: b,B,12,12,32,5,5
 
-                    if use_cuda:
+                    if self.use_gpu:
                         r = r.cpu()
                     R[:,:,i,j,:,x_range[0]:x_range[1],        #b,B,u,v,C
                       y_range[0]:y_range[1]] = r.data.numpy()
@@ -203,17 +203,17 @@ class ConvCaps(nn.Module):
         return output
 
 class CapsNet(nn.Module):
-    def __init__(self,A=32,B=32,C=32,D=32, E=10,r = 3):
+    def __init__(self,A=32,B=32,C=32,D=32, E=10,r = 3, use_gpu=False):
         super(CapsNet, self).__init__()
         self.num_classes = E
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=A,
                                kernel_size=5, stride=2)
         self.primary_caps = PrimaryCaps(A,B)
-        self.convcaps1 = ConvCaps(B, C, kernel = 3, stride=2,iteration=r,
+        self.convcaps1 = ConvCaps(B, C, kernel = 3, stride=2,iteration=r, use_gpu=use_gpu,
                                   coordinate_add=False, transform_share = False)
-        self.convcaps2 = ConvCaps(C, D, kernel = 3, stride=1,iteration=r,
+        self.convcaps2 = ConvCaps(C, D, kernel = 3, stride=1,iteration=r, use_gpu=use_gpu,
                                   coordinate_add=False, transform_share = False)
-        self.classcaps = ConvCaps(D, E, kernel = 0, stride=1,iteration=r,
+        self.classcaps = ConvCaps(D, E, kernel = 0, stride=1,iteration=r, use_gpu=use_gpu,
                                   coordinate_add=True, transform_share = True)
 
 
@@ -247,10 +247,20 @@ class CapsNet(nn.Module):
         #    print(x.data.shape)
         return x
 
-    def loss(self, x, target, m): #x:b,10 target:b
+    def loss(self, x, target, m, nc): #x:b,10 target:b
+        print(x[0])
         b = x.size(0)
-        a_t = torch.cat([x[i][target[i]] for i in range(b)]) #b
-        a_t_stack = a_t.view(b,1).expand(b,10).contiguous() #b,10
+        target_mask = target > 0
+        if use_gpu:
+            target_mask = target_mask.cuda()
+        # print('target_mask')
+        # print(target_mask)
+        # print('something')
+        # print(x[0][target_mask])
+        a_t = torch.cat([x[i][target_mask[i]] for i in range(b)]) #b
+        #print('a_t')
+        #print(a_t)
+        a_t_stack = a_t.view(b,1).expand(b,nc).contiguous() #b,10
         u = m-(a_t_stack-x) #b,10
         mask = u.ge(0).float() #max(u,0) #b,10
         loss = ((mask*u)**2).sum()/b - m**2  #float
@@ -258,6 +268,10 @@ class CapsNet(nn.Module):
 
     def loss2(self,x ,target):
         loss = F.cross_entropy(x,target)
+        return loss
+
+    def loss3(self, x, target):
+        loss = F.mse_loss(x, target)
         return loss
 
 class segmentationNet(nn.Module):
@@ -283,7 +297,7 @@ class segmentationNet(nn.Module):
             nn.BatchNorm2d(64),
             nn.ReLU(True),
             # state size. (ngf) x 32 x 32
-            nn.ConvTranspose2d(64, nc, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(64, 3, 4, 2, 1, bias=False),
             nn.Tanh()
             # state size. (nc) x 64 x 64
         )
@@ -291,3 +305,7 @@ class segmentationNet(nn.Module):
     def forward(self, input):
         output = self.main(input)
         return output
+
+    def loss(self, generated, gt):
+        loss = F.mse_loss(generated, gt)
+        return loss
