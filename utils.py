@@ -54,7 +54,6 @@ def displaySamples(data, generated, gt, use_gpu, key):
 
     stacked = np.concatenate((data, generated, gt), axis = 1)
 
-
     cv2.namedWindow('Input | Gen | GT', cv2.WINDOW_NORMAL)
     cv2.imshow('Input | Gen | GT', stacked)
 

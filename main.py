@@ -41,7 +41,7 @@ parser.add_argument('--imageSize', default=128, type=int,
             help='height/width of the input image to the network')
 parser.add_argument('--lr', default=0.001, type=float,
             help='learning rate (default: 0.0005)')
-parser.add_argument('--routing_iterations', type=int, default=3,
+parser.add_argument('--r', type=int, default=3,
             help='Number of Routing Iterations')
 parser.add_argument('--clip', default=5, type=int,
             help="Gradient Clipping")
@@ -110,7 +110,7 @@ def main():
 
     lambda_ = 1e-3
     m = 0.2
-    A,B,C,D,E,r = 32,32,32,32,num_classes,args.routing_iterations
+    A,B,C,D,E,r = 32,32,32,32,num_classes,args.r
 
     # Initialize the Network
     model = capsNet.CapsNet(A,B,C,D,E,r,use_gpu)
@@ -131,8 +131,10 @@ def main():
         lambda_ = 0.9
 
     # Define the optimizer
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, 'max',patience = 1)
+    optimizer1 = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer2 = optim.Adam(segNet.parameters(), lr=args.lr)
+    scheduler1 = lr_scheduler.ReduceLROnPlateau(optimizer1, 'max',patience = 1)
+    scheduler2 = lr_scheduler.ReduceLROnPlateau(optimizer2, 'max',patience = 1)
 
     # Initialize the loss function
     # loss_fn = capsNet.MarginLoss(0.9, 0.1, 0.5)
@@ -140,13 +142,13 @@ def main():
     for epoch in range(args.start_epoch, args.epochs):
 
         # Train for one epoch
-        train(dataloaders['train'], model, segNet, optimizer, epoch, key, lambda_, m,
-              num_classes)
+        train(dataloaders['train'], model, segNet, optimizer1, optimizer2,
+            epoch, key, lambda_, m, num_classes)
 
         # Save checkpoints
         #torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (args.save_dir, epoch))
 
-def train(train_loader, model, segNet, optimizer, epoch, key, lambda_, m, nc):
+def train(train_loader, model, segNet, optimizer1, optimizer2, epoch, key, lambda_, m, nc):
     '''
         Run one training epoch
     '''
@@ -164,7 +166,7 @@ def train(train_loader, model, segNet, optimizer, epoch, key, lambda_, m, nc):
             lambda_ += 2e-1/steps
         if m < 0.9:
             m += 2e-1/steps
-        optimizer.zero_grad()
+        optimizer1.zero_grad()
         img, labels= Variable(img), Variable(labels),
         gt = Variable(gt, requires_grad=False)
         if use_gpu:
@@ -180,19 +182,23 @@ def train(train_loader, model, segNet, optimizer, epoch, key, lambda_, m, nc):
         classLoss = model.loss3(out_labels, labels)
 
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
+        classLoss.backward(retain_graph=True)
+        optimizer1.step()
 
         # Pass the output of Matrix Capsule Network to the Segmentation Network
+        optimizer2.zero_grad()
         seg = segNet(out)
-
         segLoss = segNet.loss(seg, gt)
 
         loss = classLoss + segLoss
 
         loss.backward()
-        optimizer.step()
+        optimizer2.step()
 
-        print('[%d/%d][%d/%d] Loss: %.4f'
-              % (epoch, args.epochs, i, len(train_loader), loss.mean().data[0]))
+        print('[%d/%d][%d/%d] Class Loss: %.4f | Segmentation Loss: %.4f | Total Loss: %.4f'
+              % (epoch, args.epochs, i, len(train_loader), classLoss.mean().data[0],
+                 segLoss.mean().data[0], loss.mean().data[0]))
+
         utils.displaySamples(img, seg, gt, use_gpu, key)
 
         # # Generate the target vector from the groundtruth image

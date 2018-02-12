@@ -298,7 +298,7 @@ class segmentationNet(nn.Module):
             nn.ReLU(True),
             # state size. (ngf) x 32 x 32
             nn.ConvTranspose2d(64, 3, 4, 2, 1, bias=False),
-            nn.Tanh()
+            nn.Sigmoid()
             # state size. (nc) x 64 x 64
         )
 
@@ -307,5 +307,5 @@ class segmentationNet(nn.Module):
         return output
 
     def loss(self, generated, gt):
-        loss = F.mse_loss(generated, gt)
+        loss = F.l1_loss(generated, gt)
         return loss
