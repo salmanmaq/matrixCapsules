@@ -114,16 +114,12 @@ def main():
 
     # Initialize the Network
     model = capsNet.CapsNet(A,B,C,D,E,r,use_gpu)
-    segNet = capsNet.segmentationNet(num_classes)
 
     if use_gpu:
         model.cuda()
-        segNet.cuda()
 
     print('The Matrix Capsules Network')
     print(model)
-    print('The Segmentation Network')
-    print(segNet)
 
     if args.net:
         model.load_state_dict(torch.load(args.net))
@@ -131,10 +127,8 @@ def main():
         lambda_ = 0.9
 
     # Define the optimizer
-    optimizer1 = optim.Adam(model.parameters(), lr=args.lr)
-    optimizer2 = optim.Adam(segNet.parameters(), lr=args.lr)
-    scheduler1 = lr_scheduler.ReduceLROnPlateau(optimizer1, 'max',patience = 1)
-    scheduler2 = lr_scheduler.ReduceLROnPlateau(optimizer2, 'max',patience = 1)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, 'max',patience = 1)
 
     # Initialize the loss function
     # loss_fn = capsNet.MarginLoss(0.9, 0.1, 0.5)
@@ -142,13 +136,13 @@ def main():
     for epoch in range(args.start_epoch, args.epochs):
 
         # Train for one epoch
-        train(dataloaders['train'], model, segNet, optimizer1, optimizer2,
-            epoch, key, lambda_, m, num_classes)
+        train(dataloaders['train'], model, optimizer, epoch, key, lambda_,
+                m, num_classes)
 
         # Save checkpoints
         #torch.save(net.state_dict(), '%s/net_epoch_%d.pth' % (args.save_dir, epoch))
 
-def train(train_loader, model, segNet, optimizer1, optimizer2, epoch, key, lambda_, m, nc):
+def train(train_loader, model, optimizer, epoch, key, lambda_, m, nc):
     '''
         Run one training epoch
     '''
@@ -160,13 +154,15 @@ def train(train_loader, model, segNet, optimizer1, optimizer2, epoch, key, lambd
         # Generate the class-wise probability vector
         gt_temp = gt * 255
         labels = utils.generatePresenceVector(gt_temp, key).float()
+        oneHotGT = utils.generateOneHot(gt_temp, key).float()
 
         b += 1
         if lambda_ < 1:
             lambda_ += 2e-1/steps
         if m < 0.9:
             m += 2e-1/steps
-        optimizer1.zero_grad()
+
+        optimizer.zero_grad()
         img, labels= Variable(img), Variable(labels),
         gt = Variable(gt, requires_grad=False)
         if use_gpu:
@@ -174,26 +170,23 @@ def train(train_loader, model, segNet, optimizer1, optimizer2, epoch, key, lambd
             labels = labels.cuda()
             gt = gt.cuda()
 
-        out = model(img, lambda_)
+        out, seg = model(img, lambda_)
         outForLoss = out.view(-1, nc*16 + nc) #b,10*16+10
         out_poses, out_labels = outForLoss[:,:-nc],outForLoss[:,-nc:]
 
+        utils.reverseOneHot(seg, key)
         #loss = model.loss(out_labels, labels, m, nc)
-        classLoss = model.loss3(out_labels, labels)
+        classLoss = model.classLoss(out_labels, labels)
 
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
-        classLoss.backward(retain_graph=True)
-        optimizer1.step()
 
         # Pass the output of Matrix Capsule Network to the Segmentation Network
-        optimizer2.zero_grad()
-        seg = segNet(out)
-        segLoss = segNet.loss(seg, gt)
+        segLoss = model.segLoss(seg, gt)
 
         loss = classLoss + segLoss
 
         loss.backward()
-        optimizer2.step()
+        optimizer.step()
 
         print('[%d/%d][%d/%d] Class Loss: %.4f | Segmentation Loss: %.4f | Total Loss: %.4f'
               % (epoch, args.epochs, i, len(train_loader), classLoss.mean().data[0],

@@ -122,6 +122,74 @@ def generatePresenceVector(batch, key):
 
     return label
 
+def generateOneHot(gt, key):
+    '''
+        Generates the one-hot encoded tensor for a batch of images based on
+        their class.
+    '''
+
+    batch = gt.numpy()
+    # Iterate over all images in a batch
+    for i in range(len(batch)):
+        img = batch[i,:,:,:]
+        img = np.transpose(img, (1,2,0))
+        catMask = np.ones((img.shape[0], img.shape[1]))
+        # Multiply by 19 since 19 is considered label for the background class
+
+        # Iterate over all the key-value pairs in the class Key dict
+        for k in range(len(key) + 1):
+            catMask = catMask * 0
+            if k == 19:
+                rgb = [0, 0, 0]
+            else:
+                rgb = key[k]
+            mask = np.where(np.all(img == rgb, axis = -1))
+            catMask[mask] = 1
+
+            catMaskTensor = torch.from_numpy(catMask).unsqueeze(0)
+            if 'oneHot' in locals():
+                oneHot = torch.cat((oneHot, catMaskTensor), 0)
+            else:
+                oneHot = catMaskTensor
+
+    label = oneHot.view(len(batch),len(key)+1,img.shape[0],img.shape[1])
+    return label
+
+def reverseOneHot(out, key):
+    '''
+        Generates the segmented image from the output of a segmentation network.
+        Takes a batch of tensors and returns a batch of images.
+    '''
+
+    batch = out
+    # Iterate over all images in a batch
+    for i in range(len(batch)):
+        vec = batch[i,:,:,:]
+        mx = torch.max(vec, dim=0)
+        # print(mx)
+
+    #     catMask = np.ones((img.shape[0], img.shape[1]))
+    #     # Multiply by 19 since 19 is considered label for the background class
+    #
+    #     # Iterate over all the key-value pairs in the class Key dict
+    #     for k in range(len(key) + 1):
+    #         catMask = catMask * 0
+    #         if k == 19:
+    #             rgb = [0, 0, 0]
+    #         else:
+    #             rgb = key[k]
+    #         mask = np.where(np.all(img == rgb, axis = -1))
+    #         catMask[mask] = 1
+    #
+    #         catMaskTensor = torch.from_numpy(catMask).unsqueeze(0)
+    #         if 'oneHot' in locals():
+    #             oneHot = torch.cat((oneHot, catMaskTensor), 0)
+    #         else:
+    #             oneHot = catMaskTensor
+    #
+    # label = oneHot.view(len(batch),len(key)+1,img.shape[0],img.shape[1])
+    pass
+
 def generateGTmask(batch, key):
     '''
         Generates the category-wise encoded vector for the segmentation classes

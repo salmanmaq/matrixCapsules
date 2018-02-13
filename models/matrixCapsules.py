@@ -215,7 +215,8 @@ class CapsNet(nn.Module):
                                   coordinate_add=False, transform_share = False)
         self.classcaps = ConvCaps(D, E, kernel = 0, stride=1,iteration=r, use_gpu=use_gpu,
                                   coordinate_add=True, transform_share = True)
-
+        self.seg = segmentationNet(self.num_classes)
+        self.softmax = nn.Softmax()
 
     def forward(self,x,lambda_): #b,1,28,28
         if verbose:
@@ -241,11 +242,14 @@ class CapsNet(nn.Module):
         if verbose:
             print('After ClassCaps')
             print(x.data.shape)
+        seg = self.seg(x)
+        seg = self.softmax(seg)
+        print(seg)
         #x = x.view(-1,self.num_classes*16+self.num_classes) #b,10*16+10
         #if verbose:
         #    print('After ClassCaps Reshape')
         #    print(x.data.shape)
-        return x
+        return x, seg
 
     def loss(self, x, target, m, nc): #x:b,10 target:b
         print(x[0])
@@ -270,8 +274,12 @@ class CapsNet(nn.Module):
         loss = F.cross_entropy(x,target)
         return loss
 
-    def loss3(self, x, target):
+    def classLoss(self, x, target):
         loss = F.mse_loss(x, target)
+        return loss
+
+    def segLoss(self, generated, gt):
+        loss = F.l1_loss(generated, gt)
         return loss
 
 class segmentationNet(nn.Module):
@@ -297,7 +305,7 @@ class segmentationNet(nn.Module):
             nn.BatchNorm2d(64),
             nn.ReLU(True),
             # state size. (ngf) x 32 x 32
-            nn.ConvTranspose2d(64, 3, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(64, nc, 4, 2, 1, bias=False),
             nn.Sigmoid()
             # state size. (nc) x 64 x 64
         )
@@ -305,7 +313,3 @@ class segmentationNet(nn.Module):
     def forward(self, input):
         output = self.main(input)
         return output
-
-    def loss(self, generated, gt):
-        loss = F.l1_loss(generated, gt)
-        return loss
