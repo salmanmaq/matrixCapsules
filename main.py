@@ -154,7 +154,7 @@ def train(train_loader, model, optimizer, epoch, key, lambda_, m, nc):
         # Generate the class-wise probability vector
         gt_temp = gt * 255
         labels = utils.generatePresenceVector(gt_temp, key).float()
-        oneHotGT = utils.generateOneHot(gt_temp, key).float()
+        oneHotGT = utils.generateOneHot(gt_temp, key).long()
 
         b += 1
         if lambda_ < 1:
@@ -163,25 +163,26 @@ def train(train_loader, model, optimizer, epoch, key, lambda_, m, nc):
             m += 2e-1/steps
 
         optimizer.zero_grad()
-        img, labels= Variable(img), Variable(labels),
+        img, labels= Variable(img, requires_grad=True), Variable(labels),
         gt = Variable(gt, requires_grad=False)
+        oneHotGT = Variable(oneHotGT, requires_grad=False)
         if use_gpu:
             img = img.cuda()
             labels = labels.cuda()
             gt = gt.cuda()
+            oneHotGT = oneHotGT.cuda()
 
         out, seg = model(img, lambda_)
         outForLoss = out.view(-1, nc*16 + nc) #b,10*16+10
         out_poses, out_labels = outForLoss[:,:-nc],outForLoss[:,-nc:]
 
-        utils.reverseOneHot(seg, key)
         #loss = model.loss(out_labels, labels, m, nc)
         classLoss = model.classLoss(out_labels, labels)
 
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
 
         # Pass the output of Matrix Capsule Network to the Segmentation Network
-        segLoss = model.segLoss(seg, gt)
+        segLoss = model.segLoss(seg, oneHotGT)
 
         loss = classLoss + segLoss
 

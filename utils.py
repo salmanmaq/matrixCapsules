@@ -42,6 +42,7 @@ def displaySamples(data, generated, gt, use_gpu, key):
     #generated = generated * 255
 
     generated = generated.data.numpy()
+    generated = reverseOneHot(generated, key)
     generated = np.transpose(np.squeeze(generated[0,:,:,:]), (1,2,0))
     generated = cv2.cvtColor(generated, cv2.COLOR_BGR2RGB)
 
@@ -155,40 +156,36 @@ def generateOneHot(gt, key):
     label = oneHot.view(len(batch),len(key)+1,img.shape[0],img.shape[1])
     return label
 
-def reverseOneHot(out, key):
+def reverseOneHot(batch, key):
     '''
         Generates the segmented image from the output of a segmentation network.
-        Takes a batch of tensors and returns a batch of images.
+        Takes a batch of tensors and returns a batch of numpy images in RGB (not BGR).
     '''
 
-    batch = out
     # Iterate over all images in a batch
     for i in range(len(batch)):
         vec = batch[i,:,:,:]
-        mx = torch.max(vec, dim=0)
-        # print(mx)
+        idxs = np.argmax(vec, axis=0)
 
-    #     catMask = np.ones((img.shape[0], img.shape[1]))
-    #     # Multiply by 19 since 19 is considered label for the background class
-    #
-    #     # Iterate over all the key-value pairs in the class Key dict
-    #     for k in range(len(key) + 1):
-    #         catMask = catMask * 0
-    #         if k == 19:
-    #             rgb = [0, 0, 0]
-    #         else:
-    #             rgb = key[k]
-    #         mask = np.where(np.all(img == rgb, axis = -1))
-    #         catMask[mask] = 1
-    #
-    #         catMaskTensor = torch.from_numpy(catMask).unsqueeze(0)
-    #         if 'oneHot' in locals():
-    #             oneHot = torch.cat((oneHot, catMaskTensor), 0)
-    #         else:
-    #             oneHot = catMaskTensor
-    #
-    # label = oneHot.view(len(batch),len(key)+1,img.shape[0],img.shape[1])
+        segSingle = np.zeros([idxs.shape[0], idxs.shape[1], 3])
+
+        # Iterate over all the key-value pairs in the class Key dict
+        for k in range(len(key)):
+            rgb = key[k]
+            mask = idxs == k
+            #mask = np.where(np.all(idxs == k, axis=-1))
+            print(mask)
+            segSingle[mask] = rgb
+
+        segMask = np.expand_dims(segSingle, axis=0)
+        if 'generated' in locals():
+            generated = np.concatenate((generated, segMask), axis=0)
+        else:
+            generated = segMask
+
+    print(generated.shape)
     pass
+    #return generated
 
 def generateGTmask(batch, key):
     '''

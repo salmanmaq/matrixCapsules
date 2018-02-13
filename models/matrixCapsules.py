@@ -203,7 +203,7 @@ class ConvCaps(nn.Module):
         return output
 
 class CapsNet(nn.Module):
-    def __init__(self,A=32,B=32,C=32,D=32, E=10,r = 3, use_gpu=False):
+    def __init__(self,A=32,B=32,C=32,D=32,E=10,r=3,use_gpu=False):
         super(CapsNet, self).__init__()
         self.num_classes = E
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=A,
@@ -216,9 +216,9 @@ class CapsNet(nn.Module):
         self.classcaps = ConvCaps(D, E, kernel = 0, stride=1,iteration=r, use_gpu=use_gpu,
                                   coordinate_add=True, transform_share = True)
         self.seg = segmentationNet(self.num_classes)
-        self.softmax = nn.Softmax()
 
     def forward(self,x,lambda_): #b,1,28,28
+        self.batch_size = x.shape[0]
         if verbose:
             print('Image Input')
             print(x.data.shape)
@@ -243,8 +243,6 @@ class CapsNet(nn.Module):
             print('After ClassCaps')
             print(x.data.shape)
         seg = self.seg(x)
-        seg = self.softmax(seg)
-        print(seg)
         #x = x.view(-1,self.num_classes*16+self.num_classes) #b,10*16+10
         #if verbose:
         #    print('After ClassCaps Reshape')
@@ -279,7 +277,11 @@ class CapsNet(nn.Module):
         return loss
 
     def segLoss(self, generated, gt):
-        loss = F.l1_loss(generated, gt)
+        generated = generated.permute(0,2,3,1).contiguous().view(-1,self.num_classes)
+        print(generated.shape)
+        gt = gt.permute(0,2,3,1).contiguous().view(-1,self.num_classes)
+        #print(gt.shape)
+        loss = F.cross_entropy(generated, gt)
         return loss
 
 class segmentationNet(nn.Module):
@@ -306,7 +308,7 @@ class segmentationNet(nn.Module):
             nn.ReLU(True),
             # state size. (ngf) x 32 x 32
             nn.ConvTranspose2d(64, nc, 4, 2, 1, bias=False),
-            nn.Sigmoid()
+            nn.Softmax(dim=1)
             # state size. (nc) x 64 x 64
         )
 
