@@ -154,7 +154,7 @@ def train(train_loader, model, optimizer, epoch, key, lambda_, m, nc):
         # Generate the class-wise probability vector
         gt_temp = gt * 255
         labels = utils.generatePresenceVector(gt_temp, key).float()
-        oneHotGT = utils.generateOneHot(gt_temp, key).long()
+        oneHotGT = utils.generateOneHot(gt_temp, key).float()
 
         b += 1
         if lambda_ < 1:
@@ -182,9 +182,10 @@ def train(train_loader, model, optimizer, epoch, key, lambda_, m, nc):
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
 
         # Pass the output of Matrix Capsule Network to the Segmentation Network
-        segLoss = model.segLoss(seg, oneHotGT)
+        #segLoss = model.segLoss(seg, oneHotGT)
+        segLoss= F.mse_loss(seg, oneHotGT)
 
-        loss = classLoss + segLoss
+        loss = classLoss + 10 * segLoss
 
         loss.backward()
         optimizer.step()

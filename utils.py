@@ -43,8 +43,8 @@ def displaySamples(data, generated, gt, use_gpu, key):
 
     generated = generated.data.numpy()
     generated = reverseOneHot(generated, key)
-    generated = np.transpose(np.squeeze(generated[0,:,:,:]), (1,2,0))
-    generated = cv2.cvtColor(generated, cv2.COLOR_BGR2RGB)
+    generated = np.squeeze(generated[0,:,:,:]) / 255
+    #generated = cv2.cvtColor(generated, cv2.COLOR_BGR2RGB)
 
     data = data.data.numpy()
     data = np.transpose(np.squeeze(data[0,:,:,:]), (1,2,0))
@@ -174,7 +174,6 @@ def reverseOneHot(batch, key):
             rgb = key[k]
             mask = idxs == k
             #mask = np.where(np.all(idxs == k, axis=-1))
-            print(mask)
             segSingle[mask] = rgb
 
         segMask = np.expand_dims(segSingle, axis=0)
@@ -183,9 +182,7 @@ def reverseOneHot(batch, key):
         else:
             generated = segMask
 
-    print(generated.shape)
-    pass
-    #return generated
+    return generated
 
 def generateGTmask(batch, key):
     '''
